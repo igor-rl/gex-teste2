@@ -1,0 +1,11 @@
+{
+  "name": "gex-scripts",
+  "version": "1.0.0",
+  "scripts": {
+    "generate":       "node generate-batch/generate-batch.js",
+    "generate:50k":   "node generate-batch/generate-batch.js 50000",
+    "generate:1mm":   "node generate-batch/generate-batch.js 1000000",
+    "simulate":       "node simulate-realtime.js",
+    "simulate:fast":  "node simulate-realtime.js 1000 50"
+  }
+}

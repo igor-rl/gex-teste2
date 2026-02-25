@@ -1,0 +1,20 @@
+{
+  "name": "gex-validation",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@gex/shared": "file:./shared",
+    "@aws-sdk/client-sqs": "^3.540.0",
+    "pg": "^8.11.3",
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

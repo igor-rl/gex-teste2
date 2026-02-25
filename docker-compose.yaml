@@ -1,0 +1,159 @@
+services:
+  # ─── AWS LocalStack ────────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: gex_localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs,s3,sns,cloudwatch,logs
+      - DEFAULT_REGION=us-east-1
+      - EAGER_SERVICE_LOADING=1
+      - SQS_ENDPOINT_STRATEGY=path
+      - DEBUG=0
+    volumes:
+      - ./data/localstack:/var/lib/localstack
+      - ./infra/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+    healthcheck:
+      test: ["CMD", "bash", "-c", "awslocal sqs list-queues"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─── PostgreSQL ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: gex_postgres
+    environment:
+      POSTGRES_DB: gex
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d gex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Ingestion Service ─────────────────────────────────────────
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+      target: dev
+    container_name: gex_ingestion
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_RAW_QUEUE_URL: http://localstack:4566/000000000000/gex-events-raw.fifo
+      S3_BUCKET: gex-sales-batch
+      NODE_ENV: development
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Validation Service ────────────────────────────────────────
+  validation:
+    build:
+      context: .
+      dockerfile: services/validation/Dockerfile
+      target: dev
+    container_name: gex_validation
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_RAW_QUEUE_URL: http://localstack:4566/000000000000/gex-events-raw.fifo
+      SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
+      SQS_DISCARDED_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-discarded
+      SQS_DLQ_URL: http://localstack:4566/000000000000/gex-events-raw-dlq
+      NODE_ENV: development
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Delivery Service ──────────────────────────────────────────
+  delivery:
+    build:
+      context: .
+      dockerfile: services/delivery/Dockerfile
+      target: dev
+    container_name: gex_delivery
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
+      SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
+      WEBHOOK_URL: ${WEBHOOK_URL:-https://webhook.site/your-uuid-here}
+      NODE_ENV: development
+    depends_on:
+      localstack:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Persistence Service ───────────────────────────────────────
+  persistence:
+    build:
+      context: .
+      dockerfile: services/persistence/Dockerfile
+      target: dev
+    container_name: gex_persistence
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
+      SQS_DISCARDED_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-discarded
+      DATABASE_URL: postgresql://pguser:pgpass@postgres:5432/gex
+      NODE_ENV: development
+    depends_on:
+      localstack:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Observability Service ─────────────────────────────────────
+  observability:
+    build:
+      context: .
+      dockerfile: services/observability/Dockerfile
+      target: dev
+    container_name: gex_observability
+    ports:
+      - "3005:3005"
+    environment:
+      PORT: 3005
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_RAW_QUEUE_URL: http://localstack:4566/000000000000/gex-events-raw.fifo
+      SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
+      SQS_DISCARDED_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-discarded
+      SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
+      SQS_DLQ_URL: http://localstack:4566/000000000000/gex-events-raw-dlq
+      DATABASE_URL: postgresql://pguser:pgpass@postgres:5432/gex
+      NODE_ENV: development
+    depends_on:
+      localstack:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,6 @@
+node_modules/
+**/node_modules/
+data/
+.env
+*.log
+scripts/generate-batch/batch_*.csv

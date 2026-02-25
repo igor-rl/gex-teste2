@@ -1,0 +1,52 @@
+{
+  "name": "gex",
+  "dockerComposeFile": [
+    "../docker-compose.yaml",
+    "docker-compose.yaml"
+  ],
+  "service": "devcontainer",
+  "workspaceFolder": "/app",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers-contrib/features/zsh-plugins:0": {
+      "plugins": "git git-flow F-Sy-H zsh-autosuggestions zsh-completions",
+      "omzPlugins": "https://github.com/z-shell/F-Sy-H https://github.com/zsh-users/zsh-autosuggestions https://github.com/zsh-users/zsh-completions"
+    },
+    "ghcr.io/stuartleeks/dev-container-features/shell-history:0": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "wmaurer.change-case",
+        "vivaxy.vscode-conventional-commits",
+        "pranaygp.vscode-css-peek",
+        "dbaeumer.vscode-eslint",
+        "mhutchie.git-graph",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "firsttris.vscode-jest-runner",
+        "esbenp.prettier-vscode",
+        "humao.rest-client",
+        "redhat.vscode-yaml",
+        "PKief.material-icon-theme",
+        "bradlc.vscode-tailwindcss",
+        "cweijan.vscode-database-client2",
+        "ms-azuretools.vscode-docker",
+        "rangav.vscode-thunder-client"
+      ]
+    },
+    "settings": {
+      "terminal.integrated.defaultProfile.linux": "zsh",
+      "editor.formatOnSave": true,
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "remoteEnv": {
+    "NODE_ENV": "development",
+    "REDIS_URL": "redis://redis:6379",
+    "DATABASE_URL": "postgresql://pguser:pgpass@postgres:5432/gex"
+  }
+}
