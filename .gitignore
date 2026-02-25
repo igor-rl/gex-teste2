@@ -4,3 +4,4 @@ data/
 .env
 *.log
 scripts/generate-batch/batch_*.csv
+**/package-lock.json

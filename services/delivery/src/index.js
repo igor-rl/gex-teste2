@@ -1,7 +1,7 @@
 'use strict'
 
 const { fetch } = require('undici')
-const { createLogger, sendMessage, createSQSWorker } = require('@gex/shared')
+const { createLogger, sendMessage, createSQSWorker, metrics, startMetricsServer } = require('@gex/shared')
 
 const logger = createLogger('delivery')
 
@@ -9,10 +9,8 @@ const VALID_QUEUE_URL   = process.env.SQS_VALID_QUEUE_URL
 const RESULTS_QUEUE_URL = process.env.SQS_RESULTS_QUEUE_URL
 const WEBHOOK_URL       = process.env.WEBHOOK_URL
 
-const MAX_RETRIES       = 3
-const BASE_DELAY_MS     = 1000
-
-// ─── Retry com backoff exponencial ───────────────────────────────
+const MAX_RETRIES   = 3
+const BASE_DELAY_MS = 1000
 
 async function withExponentialBackoff(fn, maxRetries, baseDelayMs) {
   let lastErr
@@ -22,7 +20,8 @@ async function withExponentialBackoff(fn, maxRetries, baseDelayMs) {
     } catch (err) {
       lastErr = err
       if (attempt < maxRetries) {
-        const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 200 // jitter
+        const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 200
+        metrics.deliveryRetries.inc()
         logger.warn({ attempt: attempt + 1, maxRetries, delay, err: err.message }, 'Retrying after backoff')
         await sleep(delay)
       }
@@ -30,8 +29,6 @@ async function withExponentialBackoff(fn, maxRetries, baseDelayMs) {
   }
   throw lastErr
 }
-
-// ─── Envio para webhook ───────────────────────────────────────────
 
 async function sendToWebhook(lead) {
   const payload = {
@@ -67,10 +64,10 @@ async function sendToWebhook(lead) {
   }, MAX_RETRIES, BASE_DELAY_MS)
 }
 
-// ─── Handler principal ───────────────────────────────────────────
-
 async function handleLead(lead, { messageId, attempt }) {
+  const end = metrics.deliveryDuration.startTimer()
   const startMs = Date.now()
+  metrics.activeWorkers.set({ service: 'delivery' }, 1)
   logger.info({ order_id: lead.order_id, correlation_id: lead.correlation_id, attempt, messageId }, 'Delivering lead')
 
   let result
@@ -94,6 +91,8 @@ async function handleLead(lead, { messageId, attempt }) {
       duration_ms:    durationMs,
     }
 
+    metrics.leadsDelivered.inc()
+    end()
     logger.info({ order_id: lead.order_id, durationMs }, '✅ Lead delivered')
 
   } catch (err) {
@@ -113,14 +112,16 @@ async function handleLead(lead, { messageId, attempt }) {
       duration_ms:    durationMs,
     }
 
+    metrics.leadsFailed.inc()
+    end()
     logger.error({ order_id: lead.order_id, err: err.message, durationMs }, '❌ Delivery failed after all retries')
   }
 
-  // Sempre envia resultado para a fila de persistência
   await sendMessage(RESULTS_QUEUE_URL, result)
 }
 
-// ─── Start ────────────────────────────────────────────────────────
+// Servidor de métricas standalone
+startMetricsServer(parseInt(process.env.METRICS_PORT || '9101', 10))
 
 const worker = createSQSWorker({
   queueUrl:    VALID_QUEUE_URL,

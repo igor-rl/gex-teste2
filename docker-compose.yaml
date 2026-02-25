@@ -70,7 +70,10 @@ services:
       dockerfile: services/validation/Dockerfile
       target: dev
     container_name: gex_validation
+    ports:
+      - "9100:9100"
     environment:
+      METRICS_PORT: 9100
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
@@ -79,9 +82,12 @@ services:
       SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
       SQS_DISCARDED_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-discarded
       SQS_DLQ_URL: http://localstack:4566/000000000000/gex-events-raw-dlq
+      DATABASE_URL: postgresql://pguser:pgpass@postgres:5432/gex
       NODE_ENV: development
     depends_on:
       localstack:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -92,14 +98,17 @@ services:
       dockerfile: services/delivery/Dockerfile
       target: dev
     container_name: gex_delivery
+    ports:
+      - "9101:9101"
     environment:
+      METRICS_PORT: 9101
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
       SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
-      WEBHOOK_URL: https://webhook.site/17a62adb-52f6-4c22-9482-7820ea482897
+      WEBHOOK_URL: ${WEBHOOK_URL:-https://webhook.site/your-uuid-here}
       NODE_ENV: development
     depends_on:
       localstack:
@@ -113,7 +122,10 @@ services:
       dockerfile: services/persistence/Dockerfile
       target: dev
     container_name: gex_persistence
+    ports:
+      - "9102:9102"
     environment:
+      METRICS_PORT: 9102
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
@@ -158,7 +170,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ─── Grafana ─────────────────────────────────────
+  # ─── Prometheus ────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: gex_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    depends_on:
+      - ingestion
+      - observability
+    restart: unless-stopped
+
+  # ─── Grafana ───────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: gex_grafana
@@ -166,7 +194,12 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_INSTALL_PLUGINS: marcusolsson-json-datasource
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards
+      - ./data/grafana:/var/lib/grafana
     depends_on:
-      - observability
+      - prometheus
       - postgres
+    restart: unless-stopped

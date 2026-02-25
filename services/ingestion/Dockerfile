@@ -1,8 +1,8 @@
 # ─── Dev ─────────────────────────────────────────────────────────
 FROM node:20-alpine AS dev
 WORKDIR /app
-COPY services/ingestion/package*.json ./
 COPY shared ./shared
+COPY services/ingestion/package*.json ./
 COPY services/ingestion .
 RUN npm install
 CMD ["npx", "nodemon", "--legacy-watch", "src/index.js"]

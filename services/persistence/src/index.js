@@ -1,7 +1,7 @@
 'use strict'
 
 const { Pool } = require('pg')
-const { createLogger, createSQSWorker } = require('@gex/shared')
+const { createLogger, createSQSWorker, metrics, startMetricsServer } = require('@gex/shared')
 
 const logger = createLogger('persistence')
 
@@ -10,12 +10,9 @@ const DISCARDED_QUEUE_URL = process.env.SQS_DISCARDED_QUEUE_URL
 
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max:              20,
+  max: 20,
   idleTimeoutMillis: 30000,
 })
-
-// ─── Upsert idempotente ───────────────────────────────────────────
-// ON CONFLICT garante que reprocessamento não cria duplicatas
 
 async function upsertLead(data) {
   await db.query(`
@@ -32,25 +29,13 @@ async function upsertLead(data) {
       processed_at  = EXCLUDED.processed_at,
       updated_at    = NOW()
   `, [
-    data.order_id,
-    data.correlation_id,
-    data.email,
-    data.phone,
-    data.full_name       || null,
-    data.product_name    || null,
-    data.product_niche   || null,
-    data.country         || null,
-    data.order_value     || null,
-    data.bottles_qty     || null,
-    data.funnel_source   || null,
-    data.purchase_date   || null,
-    data.status,
-    data.discard_reason  || null,
-    data.error_message   || null,
-    data.email_valid     ?? false,
-    data.phone_valid     ?? false,
-    1,
-    data.processed_at || new Date().toISOString(),
+    data.order_id, data.correlation_id, data.email, data.phone,
+    data.full_name || null, data.product_name || null, data.product_niche || null,
+    data.country || null, data.order_value || null, data.bottles_qty || null,
+    data.funnel_source || null, data.purchase_date || null,
+    data.status, data.discard_reason || null, data.error_message || null,
+    data.email_valid ?? false, data.phone_valid ?? false,
+    1, data.processed_at || new Date().toISOString(),
   ])
 }
 
@@ -61,28 +46,23 @@ async function insertAudit(data, eventType) {
         (order_id, correlation_id, event_type, service, payload, error_detail, duration_ms)
       VALUES ($1,$2,$3,'persistence',$4,$5,$6)
     `, [
-      data.order_id,
-      data.correlation_id,
-      eventType,
+      data.order_id, data.correlation_id, eventType,
       JSON.stringify({ status: data.status, product: data.product_name }),
-      data.error_message || null,
-      data.duration_ms   || null,
+      data.error_message || null, data.duration_ms || null,
     ])
   } catch (err) {
     logger.warn({ err: err.message }, 'Audit trail insert failed (non-critical)')
   }
 }
 
-// ─── Worker: resultados de delivery ─────────────────────────────
-
 async function handleDeliveryResult(data, { messageId }) {
+  metrics.activeWorkers.set({ service: 'persistence' }, 1)
   logger.info({ order_id: data.order_id, status: data.status, messageId }, 'Persisting delivery result')
   await upsertLead(data)
   await insertAudit(data, data.status === 'enviado' ? 'sent' : 'failed')
+  metrics.leadsPersisted.inc({ status: data.status })
   logger.info({ order_id: data.order_id, status: data.status }, 'Lead persisted')
 }
-
-// ─── Worker: leads descartados ───────────────────────────────────
 
 async function handleDiscarded(data, { messageId }) {
   const record = {
@@ -108,30 +88,23 @@ async function handleDiscarded(data, { messageId }) {
   logger.info({ order_id: record.order_id, reason: record.discard_reason, messageId }, 'Persisting discarded lead')
   await upsertLead(record)
   await insertAudit(record, 'discarded')
+  metrics.leadsPersisted.inc({ status: 'descartado' })
 }
 
-// ─── Start ────────────────────────────────────────────────────────
+// Servidor de métricas standalone
+startMetricsServer(parseInt(process.env.METRICS_PORT || '9102', 10))
 
 const deliveryWorker = createSQSWorker({
-  queueUrl:    RESULTS_QUEUE_URL,
-  concurrency: 20,
-  handler:     handleDeliveryResult,
-  logger,
+  queueUrl: RESULTS_QUEUE_URL, concurrency: 20, handler: handleDeliveryResult, logger,
 })
 
 const discardedWorker = createSQSWorker({
-  queueUrl:    DISCARDED_QUEUE_URL,
-  concurrency: 20,
-  handler:     handleDiscarded,
-  logger,
+  queueUrl: DISCARDED_QUEUE_URL, concurrency: 20, handler: handleDiscarded, logger,
 })
 
 logger.info({ results_queue: RESULTS_QUEUE_URL, discarded_queue: DISCARDED_QUEUE_URL }, '💾 Persistence workers starting...')
 
-Promise.all([
-  deliveryWorker.start(),
-  discardedWorker.start(),
-]).catch((err) => {
+Promise.all([deliveryWorker.start(), discardedWorker.start()]).catch((err) => {
   logger.error({ err }, 'Fatal error in persistence service')
   process.exit(1)
 })

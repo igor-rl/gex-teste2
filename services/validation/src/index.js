@@ -1,6 +1,6 @@
 'use strict'
 
-const { createLogger, sendMessage, createSQSWorker, enrichLead, isApprovedOrder } = require('@gex/shared')
+const { createLogger, sendMessage, createSQSWorker, enrichLead, isApprovedOrder, metrics, startMetricsServer } = require('@gex/shared')
 const { Pool } = require('pg')
 
 const logger = createLogger('validation')
@@ -10,8 +10,6 @@ const VALID_QUEUE_URL     = process.env.SQS_VALID_QUEUE_URL
 const DISCARDED_QUEUE_URL = process.env.SQS_DISCARDED_QUEUE_URL
 
 const db = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null
-
-// ─── Audit trail ─────────────────────────────────────────────────
 
 async function auditEvent(orderId, correlationId, eventType, payload, errorDetail = null, durationMs = null) {
   if (!db) return
@@ -26,46 +24,41 @@ async function auditEvent(orderId, correlationId, eventType, payload, errorDetai
   }
 }
 
-// ─── Handler principal ───────────────────────────────────────────
-
 async function handleEvent(event, { messageId, attempt }) {
+  const end = metrics.validationDuration.startTimer()
   const startMs = Date.now()
-  const orderId  = event.order_id
-  const corrId   = event.correlation_id
+  const orderId = event.order_id
+  const corrId  = event.correlation_id
 
+  metrics.activeWorkers.set({ service: 'validation' }, 1)
   logger.info({ order_id: orderId, correlation_id: corrId, attempt, messageId }, 'Validating event')
 
-  // 1. Filtrar apenas order.approved + payment approved
   if (!isApprovedOrder(event)) {
     const reason = `payment_status=${event.payment_status} | event=${event.event}`
-    const discarded = {
-      ...event,
-      discard_reason: reason,
-      processed_at: new Date().toISOString(),
-    }
+    const discarded = { ...event, discard_reason: reason, processed_at: new Date().toISOString() }
 
     await sendMessage(DISCARDED_QUEUE_URL, discarded)
     await auditEvent(orderId, corrId, 'discarded', discarded, reason)
+    metrics.eventsDiscarded.inc({ reason: 'not_approved' })
+    end()
     logger.info({ order_id: orderId, reason }, 'Event discarded — not approved')
     return
   }
 
-  // 2. Enriquecer e validar campos
   const enriched = enrichLead(event)
 
-  // 3. E-mail inválido → descartado (não pode enviar para plataforma de marketing sem email)
   if (!enriched.email_valid) {
     const reason = `invalid_email: "${enriched.email}"`
     const discarded = { ...enriched, discard_reason: reason }
 
     await sendMessage(DISCARDED_QUEUE_URL, discarded)
     await auditEvent(orderId, corrId, 'discarded', discarded, reason)
+    metrics.eventsDiscarded.inc({ reason: 'invalid_email' })
+    end()
     logger.warn({ order_id: orderId, email: enriched.email }, 'Event discarded — invalid email')
     return
   }
 
-  // 4. Válido → enfileira para delivery
-  // JobId garante idempotência: mesmo order_id não vai duplicar
   await sendMessage(VALID_QUEUE_URL, enriched, {
     messageGroupId:         orderId,
     messageDeduplicationId: `valid-${orderId}`,
@@ -73,10 +66,13 @@ async function handleEvent(event, { messageId, attempt }) {
 
   const durationMs = Date.now() - startMs
   await auditEvent(orderId, corrId, 'validated', enriched, null, durationMs)
+  metrics.eventsValidated.inc()
+  end()
   logger.info({ order_id: orderId, email: enriched.email, durationMs }, 'Lead validated → delivery queue')
 }
 
-// ─── Start ────────────────────────────────────────────────────────
+// Servidor de métricas standalone (validation não tem HTTP)
+startMetricsServer(parseInt(process.env.METRICS_PORT || '9100', 10))
 
 const worker = createSQSWorker({
   queueUrl:    RAW_QUEUE_URL,

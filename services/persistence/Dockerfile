@@ -1,8 +1,8 @@
 # ─── Dev ─────────────────────────────────────────────────────────
 FROM node:20-alpine AS dev
 WORKDIR /app
-COPY services/persistence/package*.json ./
 COPY shared ./shared
+COPY services/persistence/package*.json ./
 COPY services/persistence .
 RUN npm install
 CMD ["npx", "nodemon", "--legacy-watch", "src/index.js"]

@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'gex-ingestion'
+    static_configs:
+      - targets: ['ingestion:3001']
+    metrics_path: /metrics
+
+  - job_name: 'gex-observability'
+    static_configs:
+      - targets: ['observability:3005']
+    metrics_path: /prometheus
+
+  - job_name: 'gex-validation'
+    static_configs:
+      - targets: ['validation:9100']
+    metrics_path: /metrics
+
+  - job_name: 'gex-delivery'
+    static_configs:
+      - targets: ['delivery:9101']
+    metrics_path: /metrics
+
+  - job_name: 'gex-persistence'
+    static_configs:
+      - targets: ['persistence:9102']
+    metrics_path: /metrics

@@ -3,5 +3,3 @@ services:
     build:
       context: ./.devcontainer
       dockerfile: Dockerfile
-    volumes:
-      - ./:/app
