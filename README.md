@@ -87,7 +87,7 @@ cp .env.example .env
 
 ```bash
 # Copie o arquivo base_vendas_teste.csv para:
-cp base_vendas_teste.csv scripts/generate-batch/Base\ de\ Dados.csv
+cd base_vendas_teste.csv scripts/generate-batch/Base de Dados.csv
 ```
 
 ### 3. Subir toda a stack

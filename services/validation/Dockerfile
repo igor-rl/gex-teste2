@@ -1,7 +1,7 @@
 # ─── Dev ─────────────────────────────────────────────────────────
 FROM node:20-alpine AS dev
-COPY services/validation/package*.json ./
 WORKDIR /app
+COPY services/validation/package*.json ./
 COPY shared ./shared
 COPY services/validation .
 RUN npm install

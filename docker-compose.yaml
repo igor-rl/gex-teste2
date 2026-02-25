@@ -99,7 +99,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
       SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
-      WEBHOOK_URL: ${WEBHOOK_URL:-https://webhook.site/your-uuid-here}
+      WEBHOOK_URL: https://webhook.site/17a62adb-52f6-4c22-9482-7820ea482897
       NODE_ENV: development
     depends_on:
       localstack:
@@ -157,3 +157,16 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+  # ─── Grafana ─────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: gex_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: marcusolsson-json-datasource
+    depends_on:
+      - observability
+      - postgres

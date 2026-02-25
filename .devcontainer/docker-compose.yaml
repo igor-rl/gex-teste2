@@ -5,16 +5,3 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./:/app
-      - /app/node_modules
-    working_dir: /app
-    command: sleep infinity
-    environment:
-      NODE_ENV: development
-      REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgresql://pguser:pgpass@postgres:5432/gex
-      WEBHOOK_URL: ${WEBHOOK_URL:-https://webhook.site/your-uuid-here}
-    depends_on:
-      - redis
-      - postgres
-    networks:
-      - default

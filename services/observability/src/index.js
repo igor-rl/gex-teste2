@@ -2,8 +2,8 @@
 
 const Fastify        = require('fastify')
 const { Pool }       = require('pg')
+const cors           = require('@fastify/cors')
 const { createLogger, getQueueAttributes } = require('@gex/shared')
-
 const logger = createLogger('observability')
 
 const db = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -36,6 +36,8 @@ async function getQueueMetrics(name, url) {
 
 async function start() {
   const app = Fastify({ logger: false })
+  
+  await app.register(cors, { origin: '*' })
 
   // ─── Health ──────────────────────────────────────────────────
   app.get('/health', async () => {
@@ -193,8 +195,8 @@ async function start() {
     }
   })
 
-  const PORT = process.env.PORT || 3005
-  await app.listen({ port: PORT, host: '0.0.0.0' })
+  const PORT = parseInt(process.env.PORT || '3005', 10)
+  await app.listen({ port: PORT, host: '::' })
   logger.info({ port: PORT }, '📊 Observability service started')
 }
 

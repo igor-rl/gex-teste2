@@ -1,0 +1,5 @@
+### Enviar batch CSV
+POST http://ingestion:3001/batch
+Content-Type: text/plain
+
+< ./scripts/generate-batch/batch_10000.csv

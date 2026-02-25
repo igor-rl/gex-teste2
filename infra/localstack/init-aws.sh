@@ -68,7 +68,7 @@ awslocal s3api put-bucket-versioning \
   --versioning-configuration Status=Enabled
 
 # Notificação S3 → SQS quando arquivo CSV é enviado
-awslocal s3api put-bucket-notification-configuration \
+(awslocal s3api put-bucket-notification-configuration \
   --bucket gex-sales-batch \
   --notification-configuration '{
     "QueueConfigurations": [{

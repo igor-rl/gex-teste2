@@ -4,12 +4,12 @@
   "private": true,
   "description": "GEX — Pipeline de Integração de Vendas (AWS + Microserviços)",
   "scripts": {
-    "up":          "docker compose up --build",
-    "down":        "docker compose down",
-    "logs":        "docker compose logs -f",
-    "generate":    "node scripts/generate-batch/generate-batch.js",
-    "simulate":    "node scripts/simulate-realtime.js",
-    "health":      "curl -s http://localhost:3001/health | node -e \"process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d)))\"",
-    "metrics":     "curl -s http://localhost:3005/metrics/summary"
+    "up": "docker compose up --build",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f",
+    "generate": "node scripts/generate-batch/generate-batch.js",
+    "simulate": "node scripts/simulate-realtime.js",
+    "health": "curl -s http://localhost:3001/health | node -e \"process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d)))\"",
+    "metrics": "curl -s http://localhost:3005/metrics/summary"
   }
 }

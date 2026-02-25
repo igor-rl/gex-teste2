@@ -1,10 +1,10 @@
 # ─── Dev ─────────────────────────────────────────────────────────
 FROM node:20-alpine AS dev
 WORKDIR /app
-COPY services/observability/package*.json ./
 COPY shared ./shared
-COPY services/observability .
+COPY services/observability/package*.json ./
 RUN npm install
+COPY services/observability .
 CMD ["npx", "nodemon", "--legacy-watch", "src/index.js"]
 
 # ─── Builder ─────────────────────────────────────────────────────

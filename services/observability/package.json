@@ -9,6 +9,7 @@
   "dependencies": {
     "@gex/shared": "file:./shared",
     "@aws-sdk/client-sqs": "^3.540.0",
+    "@fastify/cors": "^9.0.0",
     "fastify": "^4.26.0",
     "pg": "^8.11.3",
     "pino": "^8.19.0",

@@ -31,7 +31,7 @@ const awsConfig = {
 }
 
 const sqsClient = new SQSClient(awsConfig)
-const s3Client  = new S3Client(awsConfig)
+const s3Client = new S3Client({ ...awsConfig, forcePathStyle: true })
 
 // ─── SQS Helpers ─────────────────────────────────────────────────
 
