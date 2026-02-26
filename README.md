@@ -1,11 +1,19 @@
 # GEX — Pipeline de Integração de Vendas
 
+## Sobre o projeto
+
+**GEX** é um pipeline de integração de vendas construído com Node.js e AWS, desenhado para processar eventos de pedidos em escala — de 10 mil a mais de 1 milhão de registros — com resiliência, rastreabilidade e observabilidade ponta a ponta.
+
+O pipeline recebe eventos em tempo real via HTTP ou em lote via CSV, processa cada lead por microserviços desacoplados através de filas SQS, entrega para a plataforma de destino via webhook e persiste tudo com trilha de auditoria imutável.
+
+Desenvolvido como parte de um processo seletivo técnico, o projeto tem foco em infraestrutura: arquitetura de microserviços, filas assíncronas, idempotência, retry com backoff, throttle adaptativo e observabilidade com Prometheus e Grafana.
+
+
 ## Pré-requisitos
 
 - Docker e Docker Compose
 - Node.js 20+
 
----
 
 ## Setup
 
@@ -144,7 +152,7 @@ Throughput, latência, taxa de erro e uso de recursos por serviço. Acesse em `h
 
 Tamanho de cada fila em tempo real com alerta visual quando a DLQ recebe mensagens.
 
-![Descrição da imagem](docs/screenshots/ggrafana-painel-queues.png)
+![Descrição da imagem](docs/screenshots/grafana-painel-queues.png)
 
 ---
 
@@ -182,3 +190,18 @@ Adicionar testes de unidade cobrindo validações de email/phone, enriquecimento
 
 **DLQ nas filas downstream**
 Atualmente apenas a fila `gex-events-raw.fifo` possui Dead Letter Queue configurada. As filas `gex-leads-valid.fifo` e `gex-delivery-results` ainda não têm redrive policy — mensagens que falham repetidamente nessas etapas não são capturadas. A criação das DLQs correspondentes e a atualização do endpoint `/metrics/dlq` para monitorar todas elas está mapeada para a próxima fase.
+
+<br/>
+
+---
+
+<div align="center">
+
+<p align="center">
+<img src="https://img.shields.io/static/v1?label=IRL&message=FULL%20STACK%20DEVOPS&color=2d2d2d&style=for-the-badge&logo=GitHub">
+</p>
+
+[![GitHub](https://img.shields.io/badge/GitHub-Igor_Lage-blue?style=social&logo=github)](https://github.com/igor-rl) 
+![Static Badge](https://img.shields.io/badge/25--02--2026-black)
+
+</div>
