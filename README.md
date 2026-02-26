@@ -1,128 +1,41 @@
-# GEX — Pipeline de Integração de Vendas (AWS + Microserviços)
-
-
-configurar a fake api
-
-curl -X POST localhost:8080/config/reallyfast
-curl -X POST localhost:8080/config/fast
-curl -X POST localhost:8080/config/slow
-curl -X POST localhost:8080/config/unstable
-
-
-Pipeline de processamento de eventos de vendas com **5 microserviços Node.js** desacoplados via **AWS SQS** (simulado com LocalStack), S3 para batch histórico, PostgreSQL para persistência e trilha de auditoria completa.
-
----
-
-## Arquitetura
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ENTRADA DE DADOS                            │
-│                                                                     │
-│  POST /events (real-time) ──────┐                                   │
-│  POST /batch  (CSV bulk)  ──────┼──► [Ingestion :3001]             │
-│  POST /batch/s3 (upload S3) ───┘         │          │              │
-│                                          ▼          ▼              │
-│                                    SQS FIFO    S3 Bucket           │
-│                                 gex-events-  gex-sales-            │
-│                                    raw.fifo     batch              │
-└──────────────────────────────────────────────────────────────────--─┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       PROCESSAMENTO                                 │
-│                                                                     │
-│              [Validation Worker]                                    │
-│              ┌────────────────┐                                     │
-│              │ • Filtra approved                                    │
-│              │ • Valida email/phone                                 │
-│              │ • Enriquece lead                                     │
-│              │ • Audit trail                                        │
-│              └────────┬───────┘                                     │
-│                       │                                             │
-│          ┌────────────┴────────────┐                               │
-│          ▼                         ▼                               │
-│   SQS leads.valid.fifo    SQS leads.discarded                      │
-└──────────────────────────────────────────────────────────────────--─┘
-                │                    │
-                ▼                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       ENTREGA + PERSISTÊNCIA                        │
-│                                                                     │
-│    [Delivery Worker]           [Persistence Worker]                 │
-│    ┌─────────────────┐        ┌─────────────────────┐             │
-│    │ • POST webhook  │        │ • Upsert lead_control│             │
-│    │ • Retry 3x      │   ──►  │ • Audit trail        │             │
-│    │ • Backoff exp.  │        │ • Idempotente        │             │
-│    │ • Timeout 10s   │        └─────────────────────┘             │
-│    └─────────────────┘                 │                           │
-│           │                            ▼                           │
-│    SQS delivery.results          PostgreSQL                        │
-│                                  lead_control                      │
-│                              lead_audit_trail                      │
-└──────────────────────────────────────────────────────────────────--─┘
-                │
-                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     OBSERVABILIDADE :3005                           │
-│                                                                     │
-│  /health              /metrics/queues      /metrics/summary        │
-│  /metrics/latency     /metrics/error-rate  /metrics/pipeline-health│
-│  /metrics/dlq         /metrics/reconciliation  /audit/:orderId     │
-└──────────────────────────────────────────────────────────────────--─┘
-```
-
----
+# GEX — Pipeline de Integração de Vendas
 
 ## Pré-requisitos
 
 - Docker e Docker Compose
-- Node.js 20+ (para scripts locais)
-- Conta em https://webhook.site (copiar a URL)
+- Node.js 20+
 
 ---
 
-## Setup e execução
-
-### 1. Configurar webhook
+## Setup
 
 ```bash
+# 1. Copiar o env
 cp .env.example .env
-# Edite .env e coloque sua URL do webhook.site:
-# WEBHOOK_URL=https://webhook.site/seu-uuid-aqui
-```
 
-### 2. Colocar o CSV base
+# 2. Copiar o CSV base
+cp base_vendas_teste.csv "scripts/generate-batch/Base de Dados.csv"
 
-```bash
-# Copie o arquivo base_vendas_teste.csv para:
-cd base_vendas_teste.csv scripts/generate-batch/Base de Dados.csv
-```
-
-### 3. Subir toda a stack
-
-```bash
+# 3. Subir a stack
 docker compose up --build
 ```
 
-**O que acontece automaticamente:**
-- LocalStack inicia e cria todas as filas SQS e buckets S3
-- PostgreSQL inicializa com o schema completo
-- 5 microserviços sobem e ficam aguardando eventos
+---
 
-### 4. Verificar que tudo está saudável
+## Verificar saúde
 
 ```bash
-curl http://localhost:3001/health    # ingestion
-curl http://localhost:3005/health    # observability
+curl http://localhost:3001/health          # ingestion
+curl http://localhost:3005/health          # observability
 curl http://localhost:3005/metrics/queues  # filas SQS
+curl http://localhost:8080/health          # fake-api (webhook local)
 ```
 
 ---
 
 ## Enviando eventos
 
-### Real-time (1 evento)
+### 1 evento real-time
 
 ```bash
 curl -X POST http://localhost:3001/events \
@@ -149,22 +62,22 @@ curl -X POST http://localhost:3001/events \
   }'
 ```
 
-### Batch — CSV direto (100 registros do teste)
+### Batch CSV (100 registros base)
 
 ```bash
 curl -X POST http://localhost:3001/batch \
   -H "Content-Type: text/plain" \
-  --data-binary @scripts/generate-batch/Base\ de\ Dados.csv
+  --data-binary @"scripts/generate-batch/Base de Dados.csv"
 ```
 
-### Batch — 10k registros (Etapa II)
+### Batch gerado (10k+)
 
 ```bash
-# Gerar batch
+# Gerar
 cd scripts/generate-batch
-node generate-batch.js          # → 10.000 registros
-node generate-batch.js 50000    # → 50.000 registros
-node generate-batch.js 1000000  # → 1MM registros
+node generate-batch.js           # 10.000 registros
+node generate-batch.js 50000     # 50.000 registros
+node generate-batch.js 1000000   # 1MM registros
 
 # Enviar
 curl -X POST http://localhost:3001/batch \
@@ -175,90 +88,97 @@ curl -X POST http://localhost:3001/batch \
 ### Simulador real-time
 
 ```bash
-node scripts/simulate-realtime.js          # 100 eventos, 10/s
-node scripts/simulate-realtime.js 500 5    # 500 eventos, 5/s
-node scripts/simulate-realtime.js 2000 20  # 2000 eventos, 20/s
+node scripts/simulate-realtime.js           # 100 eventos, 10/s
+node scripts/simulate-realtime.js 500 5     # 500 eventos, 5/s
+node scripts/simulate-realtime.js 2000 20   # 2000 eventos, 20/s
 ```
 
 ---
 
-## Observabilidade
+## Fake API (webhook local)
+
+Simula o comportamento de uma API externa. Útil para testar resiliência sem depender do webhook.site.
+
+```bash
+curl -X POST localhost:8080/config/reallyfast  # sem erros, sem latência
+curl -X POST localhost:8080/config/fast        # rápida, erros mínimos
+curl -X POST localhost:8080/config/slow        # lenta, 40% respostas lentas
+curl -X POST localhost:8080/config/unstable    # 20% erro, 10% timeout
+
+curl http://localhost:8080/stats               # ver resultados
+```
+
+Para usar a fake-api como destino, configure no `.env`:
+```
+WEBHOOK_URL=http://fake-api:8080/webhook
+```
+
+---
+
+## Métricas e Observabilidade
+
+### Endpoints
 
 | Endpoint | Descrição |
 |---|---|
-| `GET :3005/health` | Health check geral + DB |
 | `GET :3005/metrics/queues` | Mensagens em cada fila SQS |
-| `GET :3005/metrics/summary` | Totais: enviados/erro/descartado |
+| `GET :3005/metrics/summary` | Totais por status (enviado/erro/descartado) |
 | `GET :3005/metrics/latency` | Latência p50/p95 venda→entrega |
-| `GET :3005/metrics/error-rate` | Taxa de erro por hora (alerta se >5%) |
+| `GET :3005/metrics/error-rate` | Taxa de erro por hora |
 | `GET :3005/metrics/pipeline-health` | Detecta pipeline parado >30min |
-| `GET :3005/metrics/reconciliation` | DB vs filas (gap de leads) |
 | `GET :3005/metrics/recent-errors` | Últimos 50 erros |
-| `GET :3005/metrics/dlq` | Dead Letter Queue (falhas fatais) |
+| `GET :3005/metrics/dlq` | Mensagens na Dead Letter Queue |
 | `GET :3005/audit/:orderId` | Trilha completa de um pedido |
 
 ---
 
-## Recursos AWS criados (LocalStack)
+### Pipeline Monitor
 
-| Recurso | Nome | Tipo |
-|---|---|---|
-| SQS | `gex-events-raw.fifo` | FIFO — entrada principal |
-| SQS | `gex-leads-valid.fifo` | FIFO — leads aprovados |
-| SQS | `gex-leads-discarded` | Standard — descartados |
-| SQS | `gex-delivery-results` | Standard — resultados |
-| SQS | `gex-events-raw-dlq` | Standard — dead letter |
-| S3 | `gex-sales-batch` | Batch histórico CSV |
-| S3 | `gex-audit-logs` | Logs e auditoria |
-| CloudWatch | `/gex/*` | Log groups por serviço |
-| SNS | `gex-alerts` | Alertas críticos |
+Throughput, latência, taxa de erro e uso de recursos por serviço. Acesse em `http://localhost:3000` (admin/admin).
+
+![Descrição da imagem](docs/screenshots/grafana-painel-pipeline-healt.png)
 
 ---
 
-## Decisões de arquitetura
+### Filas SQS
 
-**Por que SQS FIFO para entrada?**
-Garante que o mesmo `order_id` não seja processado duas vezes concorrentemente. O `MessageDeduplicationId` baseado no `order_id` previne duplicatas mesmo em reenvios.
+Tamanho de cada fila em tempo real com alerta visual quando a DLQ recebe mensagens.
 
-**Por que Long Polling (20s)?**
-Reduz custos (menos requests vazios) e diminui latência vs polling curto.
-
-**Por que PostgreSQL com ON CONFLICT?**
-Idempotência nativa: reprocessar o mesmo lead N vezes sempre resulta no mesmo estado final. Sem duplicatas mesmo em falhas de rede.
-
-**Por que audit trail separado?**
-Tabela `lead_audit_trail` é append-only (imutável). Permite reconstruir exatamente o que aconteceu com qualquer pedido, mesmo após atualização do `lead_control`.
-
-**Por que backoff exponencial no delivery?**
-Protege o webhook externo de ser sobrecarregado em caso de instabilidade. 3 tentativas com delay 1s → 2s → 4s + jitter.
+![Descrição da imagem](docs/screenshots/ggrafana-painel-queues.png)
 
 ---
 
-## Estrutura de arquivos
+### Audit Trail
 
-```
-├── docker-compose.yaml              ← Stack completa
-├── .env.example                     ← Configuração
-├── infra/
-│   ├── init.sql                     ← Schema PostgreSQL
-│   └── localstack/
-│       └── init-aws.sh              ← Cria recursos AWS automaticamente
-├── services/
-│   ├── ingestion/     :3001         ← HTTP + S3 upload
-│   ├── validation/                  ← Filtra + enriquece leads
-│   ├── delivery/                    ← Envia para webhook
-│   ├── persistence/                 ← Grava no PostgreSQL
-│   └── observability/ :3005         ← Métricas e auditoria
-├── shared/
-│   └── src/
-│       ├── aws-client.js            ← SQS/S3 helpers + SQS Worker
-│       ├── validators.js            ← Validação email/phone/lead
-│       └── logger.js                ← Logger estruturado (pino)
-├── scripts/
-│   ├── generate-batch/
-│   │   └── generate-batch.js        ← Gera 10k-1MM eventos
-│   └── simulate-realtime.js         ← Simula eventos em tempo real
-└── docs/
-    ├── consultas_auditoria.sql      ← Queries de monitoramento
-    └── RUNBOOK.md                   ← Guia de investigação de incidentes
-```
+Jornada completa de um pedido específico, do recebimento à entrega, com duração de cada etapa.
+
+![Descrição da imagem](docs/screenshots/grafana-painel-audit.png)
+---
+
+### Logs estruturados
+
+Todos os serviços emitem logs em JSON com `order_id`, `correlation_id` e `duration_ms` para rastreamento ponta a ponta.
+
+<!-- screenshot: logs.png -->
+
+
+---
+
+## Investigação de incidentes
+
+Ver [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+
+---
+
+## Pontos de Melhoria
+
+O foco desta entrega foi a infraestrutura, resiliência do pipeline e observabilidade. Os pontos abaixo ficam mapeados para uma próxima fase:
+
+**Arquitetura de código**
+Reorganizar os serviços seguindo Domain-Driven Design (DDD), com separação clara entre domain, application, infrastructure e interfaces. Aplicar princípios SOLID e Clean Code para facilitar manutenção e extensão.
+
+**Testes**
+Adicionar testes de unidade cobrindo validações de email/phone, enriquecimento de lead e regras de descarte. Testes de integração simulando o fluxo ponta a ponta com LocalStack e banco em memória.
+
+**DLQ nas filas downstream**
+Atualmente apenas a fila `gex-events-raw.fifo` possui Dead Letter Queue configurada. As filas `gex-leads-valid.fifo` e `gex-delivery-results` ainda não têm redrive policy — mensagens que falham repetidamente nessas etapas não são capturadas. A criação das DLQs correspondentes e a atualização do endpoint `/metrics/dlq` para monitorar todas elas está mapeada para a próxima fase.
