@@ -1,5 +1,4 @@
 services:
-  # ─── AWS LocalStack ────────────────────────────────────────────
   localstack:
     image: localstack/localstack:3.4
     container_name: gex_localstack
@@ -20,8 +19,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-
-  # ─── PostgreSQL ────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: gex_postgres
@@ -39,8 +36,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  # ─── Ingestion Service ─────────────────────────────────────────
   ingestion:
     build:
       context: .
@@ -62,8 +57,6 @@ services:
       localstack:
         condition: service_healthy
     restart: unless-stopped
-
-  # ─── Validation Service ────────────────────────────────────────
   validation:
     build:
       context: .
@@ -90,8 +83,6 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-
-  # ─── Delivery Service ──────────────────────────────────────────
   delivery:
     build:
       context: .
@@ -108,14 +99,12 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       SQS_VALID_QUEUE_URL: http://localstack:4566/000000000000/gex-leads-valid.fifo
       SQS_RESULTS_QUEUE_URL: http://localstack:4566/000000000000/gex-delivery-results
-      WEBHOOK_URL: ${WEBHOOK_URL:-https://webhook.site/your-uuid-here}
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:8080/webhook}
       NODE_ENV: development
     depends_on:
       localstack:
         condition: service_healthy
     restart: unless-stopped
-
-  # ─── Persistence Service ───────────────────────────────────────
   persistence:
     build:
       context: .
@@ -140,8 +129,6 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-
-  # ─── Observability Service ─────────────────────────────────────
   observability:
     build:
       context: .
@@ -169,8 +156,6 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-
-  # ─── Prometheus ────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: gex_prometheus
@@ -185,8 +170,6 @@ services:
       - ingestion
       - observability
     restart: unless-stopped
-
-  # ─── Grafana ───────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: gex_grafana
@@ -203,3 +186,13 @@ services:
       - prometheus
       - postgres
     restart: unless-stopped
+
+
+  # ---- Fake-API ----
+  fake-api:
+    build:
+      context: .
+      dockerfile: services/fake-api/Dockerfile
+    restart: always
+    ports:
+      - "8080:8080"

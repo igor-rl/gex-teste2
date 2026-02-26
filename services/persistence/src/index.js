@@ -1,5 +1,6 @@
 'use strict'
 
+const crypto = require('crypto')
 const { Pool } = require('pg')
 const { createLogger, createSQSWorker, metrics, startMetricsServer } = require('@gex/shared')
 
@@ -14,22 +15,36 @@ const db = new Pool({
   idleTimeoutMillis: 30000,
 })
 
+// ─── Gera hash dos campos relevantes do registro ──────────────────
+function generateRecordHash(data) {
+  const fields = [
+    data.order_id,
+    data.email,
+    data.phone,
+    data.order_value,
+    data.product_name,
+    data.country,
+  ].join('|')
+
+  return crypto.createHash('sha256').update(fields).digest('hex')
+}
+
+// ─── Upsert com deduplicação via record_hash ──────────────────────
+// Retorna: 'inserted' | 'duplicate'
 async function upsertLead(data) {
-  await db.query(`
+  const recordHash = generateRecordHash(data)
+
+  const result = await db.query(`
     INSERT INTO lead_control
-      (order_id, correlation_id, email, phone, full_name, product_name, product_niche,
-       country, order_value, bottles_qty, funnel_source, purchase_date,
+      (order_id, record_hash, correlation_id, email, phone, full_name, product_name,
+       product_niche, country, order_value, bottles_qty, funnel_source, purchase_date,
        status, discard_reason, error_message, email_valid, phone_valid,
        attempt_count, processed_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-    ON CONFLICT (order_id) DO UPDATE SET
-      status        = EXCLUDED.status,
-      error_message = EXCLUDED.error_message,
-      attempt_count = lead_control.attempt_count + 1,
-      processed_at  = EXCLUDED.processed_at,
-      updated_at    = NOW()
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+    ON CONFLICT (order_id, record_hash) DO NOTHING
   `, [
-    data.order_id, data.correlation_id, data.email, data.phone,
+    data.order_id, recordHash, data.correlation_id,
+    data.email, data.phone,
     data.full_name || null, data.product_name || null, data.product_niche || null,
     data.country || null, data.order_value || null, data.bottles_qty || null,
     data.funnel_source || null, data.purchase_date || null,
@@ -37,6 +52,9 @@ async function upsertLead(data) {
     data.email_valid ?? false, data.phone_valid ?? false,
     1, data.processed_at || new Date().toISOString(),
   ])
+
+  // rowCount = 0 significa que o ON CONFLICT ignorou (duplicata)
+  return result.rowCount > 0 ? 'inserted' : 'duplicate'
 }
 
 async function insertAudit(data, eventType) {
@@ -57,8 +75,14 @@ async function insertAudit(data, eventType) {
 
 async function handleDeliveryResult(data, { messageId }) {
   metrics.activeWorkers.set({ service: 'persistence' }, 1)
-  logger.info({ order_id: data.order_id, status: data.status, messageId }, 'Persisting delivery result')
-  await upsertLead(data)
+
+  const result = await upsertLead(data)
+
+  if (result === 'duplicate') {
+    logger.info({ order_id: data.order_id, messageId }, 'Duplicate record — skipped')
+    return
+  }
+
   await insertAudit(data, data.status === 'enviado' ? 'sent' : 'failed')
   metrics.leadsPersisted.inc({ status: data.status })
   logger.info({ order_id: data.order_id, status: data.status }, 'Lead persisted')
@@ -85,10 +109,16 @@ async function handleDiscarded(data, { messageId }) {
     processed_at:   data.processed_at || new Date().toISOString(),
   }
 
-  logger.info({ order_id: record.order_id, reason: record.discard_reason, messageId }, 'Persisting discarded lead')
-  await upsertLead(record)
+  const result = await upsertLead(record)
+
+  if (result === 'duplicate') {
+    logger.info({ order_id: record.order_id, reason: record.discard_reason, messageId }, 'Duplicate discarded record — skipped')
+    return
+  }
+
   await insertAudit(record, 'discarded')
   metrics.leadsPersisted.inc({ status: 'descartado' })
+  logger.info({ order_id: record.order_id, reason: record.discard_reason }, 'Discarded lead persisted')
 }
 
 // Servidor de métricas standalone

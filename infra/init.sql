@@ -1,11 +1,13 @@
 -- ═══════════════════════════════════════════════════════════════
 -- GEX — Schema PostgreSQL
+-- v2: suporte a deduplicação por record_hash
 -- ═══════════════════════════════════════════════════════════════
 
 -- ─── Tabela principal de controle de leads ───────────────────────
 CREATE TABLE IF NOT EXISTS lead_control (
   id              SERIAL PRIMARY KEY,
-  order_id        VARCHAR(100) UNIQUE NOT NULL,
+  order_id        VARCHAR(100) NOT NULL,         -- sem UNIQUE: múltiplas versões permitidas
+  record_hash     VARCHAR(64) NOT NULL,           -- SHA-256 dos campos relevantes
   correlation_id  UUID,
   email           VARCHAR(255),
   phone           VARCHAR(50),
@@ -43,6 +45,15 @@ CREATE TABLE IF NOT EXISTS lead_audit_trail (
 );
 
 -- ─── Índices de performance ──────────────────────────────────────
+
+-- Deduplicação: bloqueia inserção de mesma versão do mesmo pedido
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_order_hash
+  ON lead_control(order_id, record_hash);
+
+-- Busca da versão mais recente por order_id
+CREATE INDEX IF NOT EXISTS idx_lead_order_created
+  ON lead_control(order_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_lead_status        ON lead_control(status);
 CREATE INDEX IF NOT EXISTS idx_lead_processed_at  ON lead_control(processed_at);
 CREATE INDEX IF NOT EXISTS idx_lead_email         ON lead_control(email);
@@ -65,6 +76,47 @@ CREATE TRIGGER trg_lead_updated_at
   BEFORE UPDATE ON lead_control
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- ─── Função: upsert com deduplicação ─────────────────────────────
+-- Retorna: 'inserted' | 'duplicate'
+CREATE OR REPLACE FUNCTION upsert_lead(
+  p_order_id       VARCHAR,
+  p_record_hash    VARCHAR,
+  p_correlation_id UUID,
+  p_email          VARCHAR,
+  p_phone          VARCHAR,
+  p_full_name      VARCHAR,
+  p_product_name   VARCHAR,
+  p_product_niche  VARCHAR,
+  p_country        VARCHAR,
+  p_order_value    NUMERIC,
+  p_bottles_qty    INT,
+  p_funnel_source  VARCHAR,
+  p_purchase_date  TIMESTAMPTZ,
+  p_status         VARCHAR
+) RETURNS TEXT AS $$
+BEGIN
+  -- Tenta inserir; se (order_id, record_hash) já existe, ignora
+  INSERT INTO lead_control (
+    order_id, record_hash, correlation_id,
+    email, phone, full_name, product_name, product_niche,
+    country, order_value, bottles_qty, funnel_source,
+    purchase_date, status
+  ) VALUES (
+    p_order_id, p_record_hash, p_correlation_id,
+    p_email, p_phone, p_full_name, p_product_name, p_product_niche,
+    p_country, p_order_value, p_bottles_qty, p_funnel_source,
+    p_purchase_date, p_status
+  )
+  ON CONFLICT (order_id, record_hash) DO NOTHING;
+
+  IF FOUND THEN
+    RETURN 'inserted';
+  ELSE
+    RETURN 'duplicate';
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ─── View: resumo por status ─────────────────────────────────────
 CREATE OR REPLACE VIEW lead_summary AS
 SELECT
@@ -77,6 +129,25 @@ SELECT
   MAX(processed_at)                              AS last_processed
 FROM lead_control
 GROUP BY status;
+
+-- ─── View: versão mais recente de cada order_id ──────────────────
+CREATE OR REPLACE VIEW lead_latest AS
+SELECT DISTINCT ON (order_id)
+  *
+FROM lead_control
+ORDER BY order_id, created_at DESC;
+
+-- ─── View: histórico de versões por pedido ────────────────────────
+CREATE OR REPLACE VIEW lead_versions AS
+SELECT
+  order_id,
+  COUNT(*)          AS version_count,
+  MIN(created_at)   AS first_seen,
+  MAX(created_at)   AS last_updated,
+  ARRAY_AGG(record_hash ORDER BY created_at) AS hash_history
+FROM lead_control
+GROUP BY order_id
+HAVING COUNT(*) > 1;
 
 -- ─── View: métricas de latência ──────────────────────────────────
 CREATE OR REPLACE VIEW latency_metrics AS

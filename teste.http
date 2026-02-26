@@ -3,3 +3,6 @@ POST http://localhost:3001/batch
 Content-Type: text/plain
 
 < ./scripts/generate-batch/batch_10000.csv
+
+### Teste da fake-api
+POST http://localhost:8080/webhook

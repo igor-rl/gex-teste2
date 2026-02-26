@@ -1,5 +1,14 @@
 # GEX — Pipeline de Integração de Vendas (AWS + Microserviços)
 
+
+configurar a fake api
+
+curl -X POST localhost:8080/config/reallyfast
+curl -X POST localhost:8080/config/fast
+curl -X POST localhost:8080/config/slow
+curl -X POST localhost:8080/config/unstable
+
+
 Pipeline de processamento de eventos de vendas com **5 microserviços Node.js** desacoplados via **AWS SQS** (simulado com LocalStack), S3 para batch histórico, PostgreSQL para persistência e trilha de auditoria completa.
 
 ---
